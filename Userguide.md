@@ -13,7 +13,7 @@ conda install -y ipython jupyter matplotlib statsmodels numpy pandas scipy seabo
 conda config --set solver libmamba
 conda update -n base -c defaults conda
 ```   
-The problem was not being able to install or update conda-libmamba-solver in the base which is the root Conda environment.
+The problem was not being able to install or update conda-libmamba-solver and other must-matching libraries in the base which is the root Conda environment.
 You just need to create your own environment instead of modifying the base.
 Resources :
 ```
