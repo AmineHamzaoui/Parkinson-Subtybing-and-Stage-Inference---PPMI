@@ -7,20 +7,25 @@ conda activate sustain_tutorial_env
 ```
 
 You need to install conda, there was a packaging problem and its solver my doing these commands :
+```
 conda install -n base conda-libmamba-solver                                                
 conda install -y ipython jupyter matplotlib statsmodels numpy pandas scipy seaborn pip --solver=libmamba  
 conda config --set solver libmamba
-conda update -n base -c defaults conda     
+conda update -n base -c defaults conda
+```   
 The problem was not being able to install or update conda-libmamba-solver in the base which is the root Conda environment.
 You just need to create your own environment instead of modifying the base.
 Resources :
+```
 https://stackoverflow.com/questions/74781771/how-we-can-resolve-solving-environment-failed-with-initial-frozen-solve-retry
+```
 
 Step 2: Use the terminal to install necessary packages for running the notebook and pySuStaIn within the environment.
 ```console
 conda install -y ipython jupyter matplotlib statsmodels numpy pandas scipy seaborn pip
 pip install git+https://github.com/ucl-pond/pySuStaIn
 ```
+
 You need to ensure the version of anaconda is matched with the version of python you have.
 
 
