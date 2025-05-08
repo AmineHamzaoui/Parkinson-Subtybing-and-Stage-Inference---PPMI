@@ -40,4 +40,4 @@ conda activate sustain_tutorial_env
 jupyter notebook
 conda deactivate
 ```
-After that you need to understand Alexandra Young implementation of the model to be able to use it : it's really intresting pure numpy, bayesian equations and bunch of indexing and broadcasting!
+After that you need to understand Alexandra Young implementation of the model to be able to use it : it's really interesting pure numpy, bayesian equations and bunch of indexing and broadcasting!
