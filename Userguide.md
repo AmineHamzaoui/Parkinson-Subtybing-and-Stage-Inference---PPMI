@@ -40,3 +40,4 @@ conda activate sustain_tutorial_env
 jupyter notebook
 conda deactivate
 ```
+After that you need to understand Alexandra Young implementation of the model to be able to use it !
