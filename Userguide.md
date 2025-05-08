@@ -6,7 +6,7 @@ conda create --name sustain_tutorial_env python=3.7
 conda activate sustain_tutorial_env
 ```
 
-You need to install conda, there was a packaging problem and its solver my doing these commands :
+You need to install conda, there was a packaging problem and its solved my doing these commands :
 ```
 conda install -n base conda-libmamba-solver                                                
 conda install -y ipython jupyter matplotlib statsmodels numpy pandas scipy seaborn pip --solver=libmamba  
