@@ -197,111 +197,170 @@ class OrdinalSustain(AbstractSustain):
 
         return p_perm_k
 
-    def _optimise_parameters(self, sustainData, S_init, f_init, rng):
+    def _optimise_parameters(self, sustainData, S_init, f_init, rng, debug=True):
         # Optimise the parameters of the SuStaIn model
+        if debug:
+            print("\n=== Starting parameter optimization ===")
+            print(f"Initial sequences (S_init):\n{S_init}")
+            print(f"Initial probabilities (f_init): {f_init}")
 
-        M                                   = sustainData.getNumSamples()   #data_local.shape[0]
-        N_S                                 = S_init.shape[0]
-        N                                   = self.stage_score.shape[1]
+        M = sustainData.getNumSamples()
+        N_S = S_init.shape[0]
+        N = self.stage_score.shape[1]
 
-        S_opt                               = S_init.copy()  # have to copy or changes will be passed to S_init
-        f_opt                               = np.array(f_init).reshape(N_S, 1, 1)
-        f_val_mat                           = np.tile(f_opt, (1, N + 1, M))
-        f_val_mat                           = np.transpose(f_val_mat, (2, 1, 0))
-        p_perm_k                            = np.zeros((M, N + 1, N_S))
+        S_opt = S_init.copy()
+        f_opt = np.array(f_init).reshape(N_S, 1, 1)
+        f_val_mat = np.tile(f_opt, (1, N + 1, M))
+        f_val_mat = np.transpose(f_val_mat, (2, 1, 0))
+        p_perm_k = np.zeros((M, N + 1, N_S))
 
+        # Calculate initial likelihoods
         for s in range(N_S):
-            p_perm_k[:, :, s]               = self._calculate_likelihood_stage(sustainData, S_opt[s])
+            p_perm_k[:, :, s] = self._calculate_likelihood_stage(sustainData, S_opt[s])
+        
+        if debug:
+            initial_likelihood = sum(np.log(np.sum(np.sum(p_perm_k * f_val_mat, axis=2), axis=1) + 1e-250))
+            print(f"\nInitial likelihood: {initial_likelihood:.4f}")
 
-        p_perm_k_weighted                   = p_perm_k * f_val_mat
-        #p_perm_k_norm                       = p_perm_k_weighted / np.tile(np.sum(np.sum(p_perm_k_weighted, 1), 1).reshape(M, 1, 1), (1, N + 1, N_S))  # the second summation axis is different to Matlab version
-        # adding 1e-250 fixes divide by zero problem that happens rarely
-        p_perm_k_norm                       = p_perm_k_weighted / np.sum(p_perm_k_weighted + 1e-250, axis=(1, 2), keepdims=True)
+        # EM algorithm starts here
+        for iteration in range(1, 100):  # Add iteration limit for safety
+            if debug:
+                print(f"\n--- Iteration {iteration} ---")
 
-        f_opt                               = (np.squeeze(sum(sum(p_perm_k_norm))) / sum(sum(sum(p_perm_k_norm)))).reshape(N_S, 1, 1)
-        f_val_mat                           = np.tile(f_opt, (1, N + 1, M))
-        f_val_mat                           = np.transpose(f_val_mat, (2, 1, 0))
-        order_seq                           = rng.permutation(N_S)  # this will produce different random numbers to Matlab
+            # E-step
+            p_perm_k_weighted = p_perm_k * f_val_mat
+            p_perm_k_norm = p_perm_k_weighted / np.sum(p_perm_k_weighted + 1e-250, axis=(1, 2), keepdims=True)
+            f_opt = (np.squeeze(np.sum(np.sum(p_perm_k_norm, axis=1), axis=0)) / np.sum(p_perm_k_norm)).reshape(N_S, 1, 1)
+            f_val_mat = np.tile(f_opt, (1, N + 1, M))
+            f_val_mat = np.transpose(f_val_mat, (2, 1, 0))
 
-        for s in order_seq:
-            order_bio                       = rng.permutation(N)  # this will produce different random numbers to Matlab
-            for i in order_bio:
-                current_sequence            = S_opt[s]
-                current_location            = np.array([0] * len(current_sequence))
-                current_location[current_sequence.astype(int)] = np.arange(len(current_sequence))
+            if debug:
+                print(f"Current mixture probabilities (f_opt): {np.squeeze(f_opt)}")
 
-                selected_event              = i
+            # M-step - optimize sequences
+            order_seq = rng.permutation(N_S)
+            sequence_changes = 0
+            likelihood_changes = []
 
-                move_event_from             = current_location[selected_event]
+            for s in order_seq:
+                order_bio = rng.permutation(N)
+                for i in order_bio:
+                    current_sequence = S_opt[s]
+                    current_location = np.array([0] * len(current_sequence))
+                    current_location[current_sequence.astype(int)] = np.arange(len(current_sequence))
 
-                this_stage_score           = self.stage_score[0, selected_event]
-                selected_biomarker          = self.stage_biomarker_index[0, selected_event]
-                possible_scores_biomarker  = self.stage_score[self.stage_biomarker_index == selected_biomarker]
+                    selected_event = i
+                    move_event_from = current_location[selected_event]
 
-                # slightly different conditional check to matlab version to protect python from calling min,max on an empty array
-                min_filter                  = possible_scores_biomarker < this_stage_score
-                max_filter                  = possible_scores_biomarker > this_stage_score
-                events                      = np.array(range(N))
-                if np.any(min_filter):
-                    min_score_bound        = max(possible_scores_biomarker[min_filter])
-                    min_score_bound_event  = events[((self.stage_score[0] == min_score_bound).astype(int) + (self.stage_biomarker_index[0] == selected_biomarker).astype(int)) == 2]
-                    move_event_to_lower_bound = current_location[min_score_bound_event] + 1
-                else:
-                    move_event_to_lower_bound = 0
-                if np.any(max_filter):
-                    max_score_bound        = min(possible_scores_biomarker[max_filter])
-                    max_score_bound_event  = events[((self.stage_score[0] == max_score_bound).astype(int) + (self.stage_biomarker_index[0] == selected_biomarker).astype(int)) == 2]
-                    move_event_to_upper_bound = current_location[max_score_bound_event]
-                else:
-                    move_event_to_upper_bound = N
-                    # FIXME: hack because python won't produce an array in range (N,N), while matlab will produce an array (N)... urgh
-                if move_event_to_lower_bound == move_event_to_upper_bound:
-                    possible_positions      = np.array([0])
-                else:
-                    possible_positions      = np.arange(move_event_to_lower_bound, move_event_to_upper_bound)
-                possible_sequences          = np.zeros((len(possible_positions), N))
-                possible_likelihood         = np.zeros((len(possible_positions), 1))
-                possible_p_perm_k           = np.zeros((M, N + 1, len(possible_positions)))
-                for index in range(len(possible_positions)):
-                    current_sequence        = S_opt[s]
+                    this_stage_score = self.stage_score[0, selected_event]
+                    selected_biomarker = self.stage_biomarker_index[0, selected_event]
+                    possible_scores_biomarker = self.stage_score[self.stage_biomarker_index == selected_biomarker]
 
-                    #choose a position in the sequence to move an event to
-                    move_event_to           = possible_positions[index]
+                    # Calculate move bounds
+                    min_filter = possible_scores_biomarker < this_stage_score
+                    max_filter = possible_scores_biomarker > this_stage_score
+                    events = np.array(range(N))
+                    
+                    if np.any(min_filter):
+                        min_score_bound = max(possible_scores_biomarker[min_filter])
+                        min_score_bound_event = events[((self.stage_score[0] == min_score_bound).astype(int) + 
+                                                     (self.stage_biomarker_index[0] == selected_biomarker).astype(int)) == 2]
+                        move_event_to_lower_bound = current_location[min_score_bound_event] + 1
+                    else:
+                        move_event_to_lower_bound = 0
+                    
+                    if np.any(max_filter):
+                        max_score_bound = min(possible_scores_biomarker[max_filter])
+                        max_score_bound_event = events[((self.stage_score[0] == max_score_bound).astype(int) + 
+                                                     (self.stage_biomarker_index[0] == selected_biomarker).astype(int)) == 2]
+                        move_event_to_upper_bound = current_location[max_score_bound_event]
+                    else:
+                        move_event_to_upper_bound = N
 
-                    # move this event in its new position
-                    current_sequence        = np.delete(current_sequence, move_event_from, 0)  # this is different to the Matlab version, which call current_sequence(move_event_from) = []
-                    new_sequence            = np.concatenate([current_sequence[np.arange(move_event_to)], [selected_event], current_sequence[np.arange(move_event_to, N - 1)]])
-                    possible_sequences[index, :] = new_sequence
+                    if move_event_to_lower_bound == move_event_to_upper_bound:
+                        possible_positions = np.array([0])
+                    else:
+                        possible_positions = np.arange(move_event_to_lower_bound, move_event_to_upper_bound)
+                    
+                    if debug and len(possible_positions) > 1:
+                        print(f"\nSequence {s}, biomarker {i} (event {selected_event})")
+                        print(f"Current position: {move_event_from}")
+                        print(f"Possible new positions: {possible_positions}")
 
-                    possible_p_perm_k[:, :, index] = self._calculate_likelihood_stage(sustainData, new_sequence)
+                    possible_sequences = np.zeros((len(possible_positions), N))
+                    possible_likelihood = np.zeros((len(possible_positions), 1))
+                    possible_p_perm_k = np.zeros((M, N + 1, len(possible_positions)))
+                    
+                    for index in range(len(possible_positions)):
+                        current_sequence = S_opt[s]
+                        move_event_to = possible_positions[index]
+                        
+                        # Create new sequence by moving the event
+                        current_sequence = np.delete(current_sequence, move_event_from, 0)
+                        new_sequence = np.concatenate([
+                            current_sequence[np.arange(move_event_to)],
+                            [selected_event],
+                            current_sequence[np.arange(move_event_to, N - 1)]
+                        ])
+                        possible_sequences[index, :] = new_sequence
 
-                    p_perm_k[:, :, s]       = possible_p_perm_k[:, :, index]
-                    total_prob_stage        = np.sum(p_perm_k * f_val_mat, 2)
-                    total_prob_subj         = np.sum(total_prob_stage, 1)
-                    possible_likelihood[index] = sum(np.log(total_prob_subj + 1e-250))
+                        possible_p_perm_k[:, :, index] = self._calculate_likelihood_stage(sustainData, new_sequence)
 
-                possible_likelihood         = possible_likelihood.reshape(possible_likelihood.shape[0])
-                max_likelihood              = max(possible_likelihood)
-                this_S                      = possible_sequences[possible_likelihood == max_likelihood, :]
-                this_S                      = this_S[0, :]
-                S_opt[s]                    = this_S
-                this_p_perm_k               = possible_p_perm_k[:, :, possible_likelihood == max_likelihood]
-                p_perm_k[:, :, s]           = this_p_perm_k[:, :, 0]
+                        # Calculate likelihood for this position
+                        temp_p_perm_k = p_perm_k.copy()
+                        temp_p_perm_k[:, :, s] = possible_p_perm_k[:, :, index]
+                        total_prob_stage = np.sum(temp_p_perm_k * f_val_mat, 2)
+                        total_prob_subj = np.sum(total_prob_stage, 1)
+                        possible_likelihood[index] = sum(np.log(total_prob_subj + 1e-250))
 
-            S_opt[s]                        = this_S
+                    possible_likelihood = possible_likelihood.reshape(possible_likelihood.shape[0])
+                    max_likelihood = max(possible_likelihood)
+                    
+                    # Check if we found a better position
+                    current_likelihood = possible_likelihood[possible_positions == move_event_from][0] if move_event_from in possible_positions else -np.inf
+                    if max_likelihood > current_likelihood + 1e-6:  # Small tolerance for numerical stability
+                        this_S = possible_sequences[possible_likelihood == max_likelihood, :][0]
+                        S_opt[s] = this_S
+                        p_perm_k[:, :, s] = possible_p_perm_k[:, :, possible_likelihood == max_likelihood][:, :, 0]
+                        sequence_changes += 1
+                        
+                        if debug:
+                            print(f"Improved sequence {s}: moved event {selected_event} from position {move_event_from} to {np.where(possible_likelihood == max_likelihood)[0][0]}")
+                            print(f"Likelihood improvement: {max_likelihood - current_likelihood:.6f}")
+                    
+                    likelihood_changes.append(max_likelihood - current_likelihood)
 
-        p_perm_k_weighted                   = p_perm_k * f_val_mat
-        p_perm_k_norm                       = p_perm_k_weighted / np.tile(np.sum(np.sum(p_perm_k_weighted, 1), 1).reshape(M, 1, 1), (1, N + 1, N_S))  # the second summation axis is different to Matlab version
-        f_opt                               = (np.squeeze(sum(sum(p_perm_k_norm))) / sum(sum(sum(p_perm_k_norm)))).reshape(N_S, 1, 1)
+            if debug:
+                print(f"\nIteration {iteration} summary:")
+                print(f"Sequence changes made: {sequence_changes}")
+                if sequence_changes > 0:
+                    avg_improvement = np.mean([x for x in likelihood_changes if x > 0])
+                    print(f"Average likelihood improvement per change: {avg_improvement:.6f}")
 
-        f_val_mat                           = np.tile(f_opt, (1, N + 1, M))
-        f_val_mat                           = np.transpose(f_val_mat, (2, 1, 0))
+            # Check convergence
+            if sequence_changes == 0:
+                if debug:
+                    print("\n=== Optimization converged ===")
+                break
 
-        f_opt                               = f_opt.reshape(N_S)
-        total_prob_stage                    = np.sum(p_perm_k * f_val_mat, 2)
-        total_prob_subj                     = np.sum(total_prob_stage, 1)
+        # Final calculations
+        p_perm_k_weighted = p_perm_k * f_val_mat
+        p_perm_k_norm = p_perm_k_weighted / np.sum(p_perm_k_weighted + 1e-250, axis=(1, 2), keepdims=True)
+        f_opt = (np.squeeze(np.sum(np.sum(p_perm_k_norm, axis=1), axis=0)) / np.sum(p_perm_k_norm)).reshape(N_S, 1, 1)
+        f_val_mat = np.tile(f_opt, (1, N + 1, M))
+        f_val_mat = np.transpose(f_val_mat, (2, 1, 0))
 
-        likelihood_opt                      = sum(np.log(total_prob_subj + 1e-250))
+        f_opt = f_opt.reshape(N_S)
+        total_prob_stage = np.sum(p_perm_k * f_val_mat, 2)
+        total_prob_subj = np.sum(total_prob_stage, 1)
+        likelihood_opt = sum(np.log(total_prob_subj + 1e-250))
+
+        if debug:
+            print("\n=== Final results ===")
+            print(f"Optimized sequences (S_opt):\n{S_opt}")
+            print(f"Optimized probabilities (f_opt): {f_opt}")
+            print(f"Final likelihood: {likelihood_opt:.4f}")
+            print(f"Improvement from initial: {likelihood_opt - initial_likelihood:.4f}")
 
         return S_opt, f_opt, likelihood_opt
 
