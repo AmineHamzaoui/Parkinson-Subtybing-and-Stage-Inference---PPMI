@@ -27,7 +27,7 @@ df = df[df["EVENT_ID"] == "V08"].copy()
 
 # 4) Define ordinal variables
 ordinal_vars = [
-    'NP1APAT', 'NP1COG', 'NP1DPRS'
+    'NP1APAT', 'NP1COG', 'NP1DPRS','NP1DPRS', 'NP1HALL'
 ]
 
 selected_columns = ["PATNO", "AGE_AT_VISIT",
